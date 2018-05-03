@@ -35,8 +35,7 @@ void initPaths(int height, int width,vector<PathDirection>& Paths)
     }
     for(int i = 0 ; i < PATHS_PER_SCAN; i++)
     {
-        cout << i <<endl;
-        
+        //cout << i <<endl;
         switch(i)
         {  
             /* 方向
@@ -246,7 +245,7 @@ void preSobelFilterCap(Mat& leftImage,Mat& rightImage,uchar *tab,const int OFS)
     }
 } 
 
-void CalculateSADCost(const Mat& leftImage,const Mat& rightImage,const int SADWindows,const int disparity,vector<vector<vector<long>>>& CBTcost)
+void CalculateSADCost(const Mat& leftImage,const Mat& rightImage,const int SADWindows,const int disparity,vector<vector<vector<long>>>& CBTcost,Mat& SADDisparity)
 {
     int width = leftImage.cols;
     int height = leftImage.rows;
@@ -257,7 +256,7 @@ void CalculateSADCost(const Mat& leftImage,const Mat& rightImage,const int SADWi
     int x2 = height - SADWindows;
     int y2 = width - SADWindows;
 
-    Mat SADDisparity(height,width,0);
+    //Mat SADDisparity(height,width,0);
 
     int sum = 0, rightTemp = 0,leftTemp = 0;
 
@@ -291,7 +290,7 @@ void CalculateSADCost(const Mat& leftImage,const Mat& rightImage,const int SADWi
             SADDisparity.at<uchar>(x,y)=(tempIndex * 2);
         }          
     }
-    imwrite("SADDisparity.jpg",SADDisparity);
+    //imwrite("SADDisparity.jpg",SADDisparity);
 }
     
 void CensusCalculate(const Mat& leftImage,const Mat& rightImage,const int CensusWindows,vector<unsigned int>& leftCensus,vector<unsigned int>& rightCensus,const int disparity)//,unsigned int *leftCensus,unsigned int *rightCensus /* )
@@ -361,7 +360,7 @@ void CensusCalculate(const Mat& leftImage,const Mat& rightImage,const int Census
     }
 
     leftCensus.assign(leftCensusTemp.begin(),leftCensusTemp.end()); 
-    cout << leftCensus.size() << endl;
+    //cout << leftCensus.size() << endl;
     rightCensus.assign(rightCensusTemp.begin(),rightCensusTemp.end());
 }
 
@@ -383,16 +382,14 @@ int GetHammingWeight(unsigned int value)
     return count;  
 } 
 
-void CalculateCensusCost(const vector<unsigned int> &leftCensus,const vector<unsigned int> &rightCensus,Mat& CensusDisparity,
-                        const int disparity,const int CensusWindows,vector<vector<vector<long>>>& Cbuf)
+void CalculateCensusCost(const vector<unsigned int> &leftCensus,const vector<unsigned int> &rightCensus,
+                        const int disparity,const int CensusWindows,vector<vector<vector<long>>>& Cbuf,Mat& Census)
 {
     int CensusPixelSum = (2 * CensusWindows + 1) * (2 * CensusWindows + 1);
     int bitlength = (CensusPixelSum % 32 == 0) ? (CensusPixelSum / 32) : ( CensusPixelSum / 32 + 1 );
 
-    int width = CensusDisparity.cols;
-    int height = CensusDisparity.rows;
-
-    const size_t bufferSize = width * height * bitlength + disparity * bitlength;
+    int width = Census.cols;
+    int height = Census.rows;
 
     int sum = 0;
 
@@ -419,26 +416,25 @@ void CalculateCensusCost(const vector<unsigned int> &leftCensus,const vector<uns
                      tempIndex = d;  
                  }
             }
-            CensusDisparity.at<uchar>(i,j)=(tempIndex * 2);
+            Census.at<uchar>(i,j)=(tempIndex * 2);
         }
     }
-    imwrite("census.jpg",CensusDisparity);
-    //imwrite("MatchLevel.jpg",MatchLevelImage); 
+    //imwrite("census.jpg",CensusDisparity);
 }
 
-void CalculateBTHammingDistance(const vector<vector<vector<long>>>& Cbuf,vector<vector<vector<long>>>& Ccost,const int SADWindows)
+void CalculateBTHammingDistance(const vector<vector<vector<long>>>& Cbuf,vector<vector<vector<long>>>& Ccost,const int SADWindows,Mat& CensusSAD)
 {  
     int height = Cbuf.size();
     int width = Cbuf[1].size();
     int disparity = Cbuf[1][1].size();
-// const size_t bufferSize = width * height * bitlength;
+//  const size_t bufferSize = width * height * bitlength;
     int x1 = SADWindows;
     int y1 = SADWindows;
 
     int x2 = height - SADWindows;
     int y2 = width - SADWindows;
 
-    Mat CensusBTDisparity(height,width,0);
+    //Mat CensusSAD(height,width,0);
 
     int sum = 0;
 
@@ -467,20 +463,18 @@ void CalculateBTHammingDistance(const vector<vector<vector<long>>>& Cbuf,vector<
                      tempIndex = d;      
                 }
             }
-            CensusBTDisparity.at<uchar>(x,y)=(tempIndex * 2);
+            CensusSAD.at<uchar>(x,y)=(tempIndex * 2);
         }
     }
-    imwrite("CensusBTDisparity.jpg",CensusBTDisparity);
+    // imwrite(str,CensusBTDisparity);
 }
 
-void CalculateDymProgCost(const vector<vector<vector<long>>>& Cbuf,const int P1,const int P2)
+void CalculateDymProgCost(const vector<vector<vector<long>>>& Cbuf,const int P1,const int P2,Mat& CalculateDym)
 {
     const int height = Cbuf.size();
     const int width = Cbuf[1].size();
     const int disparity = Cbuf[1][1].size();
     const int Pathnum = 8;
-
-    Mat CalculateDym(height,width,0);
 
     vector<vector<vector<vector<int>>>> S;
 
@@ -502,9 +496,7 @@ void CalculateDymProgCost(const vector<vector<vector<long>>>& Cbuf,const int P1,
     vector<int> minLr(width); //保存上一次的最小值
 
     vector<int> Delta(Pathnum);
-
-    vector<int> L(Pathnum);
-    
+   
     vector<int> Lr;
     Lr.resize(disparity + 2);
    
@@ -516,20 +508,18 @@ void CalculateDymProgCost(const vector<vector<vector<long>>>& Cbuf,const int P1,
 
     for(int path = 0;path < Paths.size();path++)
     {
-        cout << "Path" << path << endl;
+        //cout << "Path" << path << endl;
         for(int i = Paths[path].start_r;i < Paths[path].end_r;i = i + Paths[path].dy)
         {
-            //cout << "i" << i << "width"<< width << endl;
             for(int j = Paths[path].start_c;j < Paths[path].end_c;j = j + Paths[path].dx)
             {
-                int tempIndex = 0;
                 int prex = j - Paths[path].dc;
                 int prey = i - Paths[path].dr;
 
                 Lrpre.assign(S[path][prey][prex].begin(),S[path][prey][prex].end());
 
                 int Delta = minLr[prex] + P2;
-                cout << Delta << endl;
+                //cout << Delta << endl;
 
                 minLr[j] = SHRT_MAX;
 
@@ -612,8 +602,16 @@ void CalculateDymProgCost(const vector<vector<vector<long>>>& Cbuf,const int P1,
         }
     }
     */
-   imwrite("CalculateDym.jpg",CalculateDym);
+   //imwrite(str,CalculateDym);
 
+}
+
+void HoleFilling(Mat& DisparityImg)
+{
+    const int width = DisparityImg.cols;
+    const int height = DisparityImg.rows;
+
+    Mat IntegralImg;
 }
 
 int main()
@@ -623,10 +621,8 @@ int main()
 
     CV_Assert( leftImage.size() == rightImage.size());
 
-    int width = leftImage.cols;
-    int height = leftImage.rows;
-
-    const Size SADwindows = Size(9,9);
+    const int width = leftImage.cols;
+    const int height = leftImage.rows;
 
     const int OFS = 256*4, TABSZ = OFS*2 + 256;
     uchar tab[TABSZ] = { 0 };
@@ -637,18 +633,20 @@ int main()
         tab[x] = (uchar)(x - OFS < -FilterCapnum ? 0 : x - OFS > FilterCapnum ? FilterCapnum*2 : x - OFS + FilterCapnum);
     }
 
-    preSobelFilterCap(leftImage,rightImage,tab,OFS);
+    // preSobelFilterCap(leftImage,rightImage,tab,OFS);
 
     const int disparity = 128;
-    const int D = disparity;
     const int CensusWindows = 5;
-    const int SADWindows2 = 5;
+    const int SADWindows = 5;
 
     vector<unsigned int>leftCensus;
     vector<unsigned int>rightCensus;
 
-    int bitlength = 0;
-    Mat CensusDisparity(height,width,0);
+    Mat Census(height,width,0);
+    Mat SAD(height,width,0);
+    Mat CensusSAD(height,width,0);
+    Mat CensusDym(height,width,0);
+    Mat CensusDymSAD(height,width,0);
 
     CensusCalculate(leftImage,rightImage,CensusWindows,leftCensus,rightCensus,disparity);
 
@@ -669,26 +667,36 @@ int main()
         {
             Cbuf[i][j].resize(disparity);
             CBTcost[i][j].resize(disparity);
-           CensusBTcost[i][j].resize(disparity);
+            CensusBTcost[i][j].resize(disparity);
         }       
     }
-    
-    CalculateSADCost(leftImage,rightImage,SADWindows2,disparity,CBTcost);
-    CalculateCensusCost(leftCensus,rightCensus,CensusDisparity,disparity,CensusWindows,Cbuf);
+    cout << "SAD" << endl;
+    // CalculateSADCost(leftImage,rightImage,SADWindows,disparity,CBTcost,SAD);
 
-    CalculateBTHammingDistance(Cbuf,CensusBTcost,SADWindows2);
+    cout << "CalculateCensusCost" << endl;
+    CalculateCensusCost(leftCensus,rightCensus,disparity,CensusWindows,Cbuf,Census);
 
+    cout << "CalculateBTHammingDistance" << endl;
+    CalculateBTHammingDistance(Cbuf,CensusBTcost,SADWindows,CensusSAD);
 
     const int P1 = 3;
     const int P2 = 20;
 
-    //CalculateDymProgCost(Cbuf,P1,P2);
-    CalculateDymProgCost(CensusBTcost,P1,P2);
+    cout << "CalculateDym" << endl;
+    CalculateDymProgCost(Cbuf,P1,P2,CensusDym);
+
+    cout << "CalculateDymSAD" << endl;
+    CalculateDymProgCost(CensusBTcost,P1,P2,CensusDymSAD);
+
 
     cout << "-----" << endl;
     imshow("left",leftImage);
     imshow("right",rightImage);
-    imshow("Census",CensusDisparity);
+    imshow("SAD",SAD);
+    imshow("Census",Census);
+    imshow("CensusSAD",CensusSAD);
+    imshow("CensusDym",CensusDym);
+    imshow("CensusSADDym",CensusDymSAD);
 
     int key = waitKey(0);
     if(key == 27) 
