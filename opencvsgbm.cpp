@@ -383,7 +383,7 @@ int GetHammingWeight(unsigned int value)
 } 
 
 void CalculateCensusCost(const vector<unsigned int> &leftCensus,const vector<unsigned int> &rightCensus,
-                        const int disparity,const int CensusWindows,vector<vector<vector<long>>>& Cbuf,Mat& Census)
+                        const int disparity,const int CensusWindows,vector<vector<vector<long>>>& Cleftbuf,vector<vector<vector<long>>>& Crightbuf,Mat& Census)
 {
     int CensusPixelSum = (2 * CensusWindows + 1) * (2 * CensusWindows + 1);
     int bitlength = (CensusPixelSum % 32 == 0) ? (CensusPixelSum / 32) : ( CensusPixelSum / 32 + 1 );
@@ -391,32 +391,39 @@ void CalculateCensusCost(const vector<unsigned int> &leftCensus,const vector<uns
     int width = Census.cols;
     int height = Census.rows;
 
-    int sum = 0;
+    int sumright = 0;
 
-    for(int i = 0; i < height; i++)
+    int sumleft = 0;
+
+    for(int i = 1; i < height; i++)
     {
         for(int j = 0; j < width; j++)
         {
             for (int d = 0; d < disparity;d++)
             {
-                sum = 0;
+                sumright = 0;
+                sumleft = 0;
                 for(int l = 0; l < bitlength; l++)
                 {
-                        sum += GetHammingWeight(rightCensus[(i*width+j)*bitlength + l]   
-                            ^ leftCensus[(i*width+j+d)*bitlength + l]);                                         
+                        sumright += GetHammingWeight(rightCensus[(i*width+j)*bitlength + l]   
+                            ^ leftCensus[(i*width+j+d)*bitlength + l]); 
+
+                        sumleft += GetHammingWeight(leftCensus[(i*width+j)*bitlength + l]   
+                            ^ rightCensus[(i*width+j-d)*bitlength + l]);                                         
                 }
-                Cbuf[i][j][d] = sum;
+                Cleftbuf[i][j][d] = sumleft;
+                Crightbuf[i][j][d] = sumright;
             }
 
             int  tempIndex = 0;
             for (int d = 1; d < disparity; d++)
             {
-                if (Cbuf[i][j][d] < Cbuf[i][j][tempIndex])  
+                if (Cleftbuf[i][j][d] < Cleftbuf[i][j][tempIndex])  
                  {    
                      tempIndex = d;  
                  }
             }
-            Census.at<uchar>(i,j)=(tempIndex * 2);
+            Census.at<uchar>(i,j)=(tempIndex*2);
         }
     }
     //imwrite("census.jpg",CensusDisparity);
@@ -569,7 +576,7 @@ void CalculateDymProgCost(const vector<vector<vector<long>>>& Cbuf,const int P1,
                 }
             }
 
-            CalculateDym.at<uchar>(i,j)=(tempIndex * 2);       
+            CalculateDym.at<uchar>(i,j)=(tempIndex);      
         }
     }
 
@@ -606,12 +613,61 @@ void CalculateDymProgCost(const vector<vector<vector<long>>>& Cbuf,const int P1,
 
 }
 
-void HoleFilling(Mat& DisparityImg)
+void HoleFilling(const Mat& leftDisparityImg,const Mat& rightDisparityImg,const int threshold,Mat& modifyDisparityImg)
 {
-    const int width = DisparityImg.cols;
-    const int height = DisparityImg.rows;
+    const int width = leftDisparityImg.cols;
+    const int height = leftDisparityImg.rows;
 
-    Mat IntegralImg;
+    for(int y = 0;y < height;y++)   
+    {
+       const uchar* leftptr = leftDisparityImg.ptr<uchar>(y);
+       const uchar* rightptr = rightDisparityImg.ptr<uchar>(y);
+        for(int x = 0;x < width;x++)
+        {
+            int pl = (uchar)leftptr[x];
+
+            if(x - pl < 0)
+            {
+                pl = x;                
+            }
+            
+            int pr = (uchar)rightptr[x-pl];
+
+            abs(pr - pl) > threshold ? modifyDisparityImg.at<uchar>(y,x) = 0 : modifyDisparityImg.at<uchar>(y,x) = 3 * pr;
+        }
+    }
+
+    for(int y = 0;y < height;y++)   
+    {
+        //const uchar* leftptr = leftDisparityImg.ptr<uchar>(y);
+        //const uchar* rightptr = rightDisparityImg.ptr<uchar>(y);
+        for(int x = 0;x < width;x++)
+        {
+            int temp = (uchar)modifyDisparityImg.at<uchar>(y,x);
+
+            if(temp == 0)
+            {
+                int lp = 0,rp = 0;
+
+                int lx = x,rx = x;
+                if (lx - 1 < 0)
+                    lp = temp;
+
+                while((lp == 0) && ( lx > 0 ))
+                    lp = (uchar)modifyDisparityImg.at<uchar>(y,lx--);
+                
+                if (rx - 1  > width)
+                    rp = temp;
+                
+                while((rp == 0) && ( rx < width))
+                    rp = (uchar)modifyDisparityImg.at<uchar>(y,rx++);
+
+                modifyDisparityImg.at<uchar>(y,x) =  std::min(rp,lp);
+                // modifyDisparityImg.at<uchar>(y,x) =(rp + lp) / 2;
+            }
+            
+        }
+    }
 }
 
 int main()
@@ -645,58 +701,95 @@ int main()
     Mat Census(height,width,0);
     Mat SAD(height,width,0);
     Mat CensusSAD(height,width,0);
-    Mat CensusDym(height,width,0);
-    Mat CensusDymSAD(height,width,0);
+
+    Mat CensusDymleft(height,width,0);
+    Mat CensusDymSADleft(height,width,0);
+
+    Mat CensusDymright(height,width,0);
+    Mat CensusDymSADright(height,width,0);
+
+    Mat modifyDisparityImg(height,width,0);
+    Mat modifyDisparityImgSAD(height,width,0);
 
     CensusCalculate(leftImage,rightImage,CensusWindows,leftCensus,rightCensus,disparity);
 
-    vector<vector<vector<long>>> Cbuf;
-    vector<vector<vector<long>>> CBTcost;
-    vector<vector<vector<long>>> CensusBTcost;
+    vector<vector<vector<long>>> Cleftbuf;
+    vector<vector<vector<long>>> Crightbuf;
 
-    Cbuf.resize(height);
+    vector<vector<vector<long>>> CBTcost;
+
+    vector<vector<vector<long>>> CensusleftBTcost;
+    vector<vector<vector<long>>> CensusrightBTcost;
+
+    Cleftbuf.resize(height);
+    Crightbuf.resize(height);
+
     CBTcost.resize(height);
-    CensusBTcost.resize(height);
+
+    CensusleftBTcost.resize(height);
+    CensusrightBTcost.resize(height);
     for(int i = 0;i < height; ++i)
     {
-        Cbuf[i].resize(width);
+        Cleftbuf[i].resize(width);
+        Crightbuf[i].resize(width);
+
         CBTcost[i].resize(width);
-        CensusBTcost[i].resize(width);
+        CensusleftBTcost[i].resize(width);
+        CensusrightBTcost[i].resize(width);
 
         for(int j = 0;j < width;++j)
         {
-            Cbuf[i][j].resize(disparity);
+            Cleftbuf[i][j].resize(disparity);
+            Crightbuf[i][j].resize(disparity);
+
             CBTcost[i][j].resize(disparity);
-            CensusBTcost[i][j].resize(disparity);
+
+            CensusleftBTcost[i][j].resize(disparity);
+            CensusrightBTcost[i][j].resize(disparity);
         }       
     }
     cout << "SAD" << endl;
     // CalculateSADCost(leftImage,rightImage,SADWindows,disparity,CBTcost,SAD);
 
     cout << "CalculateCensusCost" << endl;
-    CalculateCensusCost(leftCensus,rightCensus,disparity,CensusWindows,Cbuf,Census);
+    CalculateCensusCost(leftCensus,rightCensus,disparity,CensusWindows,Cleftbuf,Crightbuf,Census);
 
     cout << "CalculateBTHammingDistance" << endl;
-    CalculateBTHammingDistance(Cbuf,CensusBTcost,SADWindows,CensusSAD);
+    CalculateBTHammingDistance(Cleftbuf,CensusleftBTcost,SADWindows,CensusSAD);
+    CalculateBTHammingDistance(Crightbuf,CensusrightBTcost,SADWindows,CensusSAD);
 
     const int P1 = 3;
     const int P2 = 20;
 
     cout << "CalculateDym" << endl;
-    CalculateDymProgCost(Cbuf,P1,P2,CensusDym);
+    CalculateDymProgCost(Cleftbuf,P1,P2,CensusDymleft);
+    CalculateDymProgCost(Crightbuf,P1,P2,CensusDymright);
 
     cout << "CalculateDymSAD" << endl;
-    CalculateDymProgCost(CensusBTcost,P1,P2,CensusDymSAD);
+    CalculateDymProgCost(CensusleftBTcost,P1,P2,CensusDymSADleft);
+    CalculateDymProgCost(CensusrightBTcost,P1,P2,CensusDymSADright);
 
+    HoleFilling(CensusDymleft,CensusDymright,2,modifyDisparityImg);
+    medianBlur ( modifyDisparityImg, modifyDisparityImg, 3 );  
+
+    HoleFilling(CensusDymSADleft,CensusDymSADright,2,modifyDisparityImgSAD);
+    medianBlur ( modifyDisparityImgSAD,modifyDisparityImgSAD, 3 );
 
     cout << "-----" << endl;
     imshow("left",leftImage);
     imshow("right",rightImage);
-    imshow("SAD",SAD);
+    //imshow("SAD",SAD);
+    /*
     imshow("Census",Census);
     imshow("CensusSAD",CensusSAD);
     imshow("CensusDym",CensusDym);
     imshow("CensusSADDym",CensusDymSAD);
+    */
+    imshow("CensusDym",CensusDymleft);
+    imshow("CensusSADDym",CensusDymSADleft);
+    imshow("CensusDymleft",CensusDymleft);
+    imshow("modifyDisparityImg",modifyDisparityImg);
+    imshow("modifyDisparityImgSAD",modifyDisparityImgSAD);
 
     int key = waitKey(0);
     if(key == 27) 
