@@ -42,16 +42,16 @@ void initPaths(int height, int width,vector<PathDirection>& Paths)
                 ------>        
             */
             case 0:                      
-            Paths[i].start_c = 0 + 1;
+            Paths[i].start_c = 0 + 1;    // start_c start_r end_c end_r +1 -1 操作是为了防止动态规划过程中越界
             Paths[i].start_r = 0 + 1;
 
             Paths[i].end_c = width - 1 - 1;
             Paths[i].end_r = height - 1 - 1;
 
             Paths[i].dc = 1;
-            Paths[i].dr = 0;
+            Paths[i].dr = 0;           // 搜索方向
 
-            Paths[i].dx = 1;
+            Paths[i].dx = 1;      //像素点前进方向
             Paths[i].dy = 1;
             break;
             /* 方向
@@ -245,7 +245,7 @@ void preSobelFilterCap(Mat& leftImage,Mat& rightImage,uchar *tab,const int OFS)
     }
 } 
 
-void CalculateSADCost(const Mat& leftImage,const Mat& rightImage,const int SADWindows,const int disparity,vector<vector<vector<long>>>& CBTcost,Mat& SADDisparity)
+void CalculateSADCost(const Mat& leftImage,const Mat& rightImage,const int SADWindows,const int minDisparity,const int maxDisparity,vector<vector<vector<long>>>& CBTcost,Mat& SADDisparity)
 {
     int width = leftImage.cols;
     int height = leftImage.rows;
@@ -256,6 +256,8 @@ void CalculateSADCost(const Mat& leftImage,const Mat& rightImage,const int SADWi
     int x2 = height - SADWindows;
     int y2 = width - SADWindows;
 
+    int DisparityRange = maxDisparity - minDisparity;
+
     //Mat SADDisparity(height,width,0);
 
     int sum = 0, rightTemp = 0,leftTemp = 0;
@@ -264,22 +266,22 @@ void CalculateSADCost(const Mat& leftImage,const Mat& rightImage,const int SADWi
     {
         for(int y = y1; y < y2; y++)
         {
-            for(int d = 0;d < disparity;d++)
+            for(int d = 0;d < DisparityRange;d++)
             {
                 sum = 0;
                 for(int m = x - SADWindows; m <= x + SADWindows; m++)
                 {
                     for (int n = y - SADWindows; n <= y + SADWindows; n++)
                     { 
-                        (m + d < width) ? leftTemp = (int)leftImage.at<uchar>(m,n+d) : leftTemp = (int)leftImage.at<uchar>(m,width - 1);
+                        (m + d + minDisparity < width) ? leftTemp = (int)leftImage.at<uchar>(m,n+d + minDisparity) : leftTemp = (int)leftImage.at<uchar>(m,width - 1);
                         rightTemp = (int)rightImage.at<uchar>(m,n);
                         sum = sum + abs(leftTemp - rightTemp);
                     }
                 }
-                CBTcost[x][y][d] = sum/((2 *SADWindows + 1) * (2 * SADWindows + 1));
+                CBTcost[x][y][d] = sum/((2 *SADWindows + 1) * (2 * SADWindows + 1));  //块匹配,求取块平均值作为CBTcost
             } 
             int tempIndex = 0;
-            for (int d = 1; d < disparity; d++)
+            for (int d = 1; d < DisparityRange; d++)
             {
                 if (CBTcost[x][y][d] < CBTcost[x][y][tempIndex]) 
                 {  
@@ -287,22 +289,24 @@ void CalculateSADCost(const Mat& leftImage,const Mat& rightImage,const int SADWi
                       
                 }
             }
-            SADDisparity.at<uchar>(x,y)=(tempIndex * 2);
+            SADDisparity.at<uchar>(x,y)=(tempIndex + DisparityRange) * 2;
         }          
     }
     //imwrite("SADDisparity.jpg",SADDisparity);
 }
     
-void CensusCalculate(const Mat& leftImage,const Mat& rightImage,const int CensusWindows,vector<unsigned int>& leftCensus,vector<unsigned int>& rightCensus,const int disparity)//,unsigned int *leftCensus,unsigned int *rightCensus /* )
+void CensusCalculate(const Mat& leftImage,const Mat& rightImage,const int CensusWindows,vector<unsigned int>& leftCensus,vector<unsigned int>& rightCensus,const int minDisparity,const int maxDisparity)//,unsigned int *leftCensus,unsigned int *rightCensus /* )
 {
 
     int CensusPixelSum = (2 * CensusWindows + 1) * (2 * CensusWindows + 1);
-    int bitlength = (CensusPixelSum % 32 == 0) ? (CensusPixelSum / 32) : ( CensusPixelSum / 32 + 1 );
+    int bitlength = (CensusPixelSum % 32 == 0) ? (CensusPixelSum / 32) : ( CensusPixelSum / 32 + 1 ); 
 
     int width = leftImage.cols;
     int height = leftImage.rows;
 
-    const size_t bufferSize = width * height * bitlength + disparity * bitlength;
+    const int DisparityRange = maxDisparity - minDisparity + 1;
+
+    const size_t bufferSize = width * height * bitlength + DisparityRange * bitlength;  //定义所需所有census变化所需要的数组长度
 
     cout << bufferSize << endl;
     vector<unsigned int> leftCensusTemp(bufferSize);
@@ -321,6 +325,7 @@ void CensusCalculate(const Mat& leftImage,const Mat& rightImage,const int Census
 
     for(int x = x1; x < x2; x++)
     {
+  
         for(int y = y1; y < y2; y++)
         {
             CenterPixel = leftImage.at<uchar>(x, y);
@@ -333,7 +338,8 @@ void CensusCalculate(const Mat& leftImage,const Mat& rightImage,const int Census
                     neighborPixel = leftImage.at<uchar>(m,n);
 
                     bigger = (neighborPixel > CenterPixel) ? 1 : 0;
-                    leftCensusTemp[( x * width + y) * bitlength + bitCount/32] |= (bigger << (bitCount % 32));
+                    //cout << bigger << endl;
+                    leftCensusTemp[( x * width + y) * bitlength + bitCount/32] |= (bigger << (bitCount % 32)); //保存census变换后的二进制码流
                 }
             }
         }
@@ -353,7 +359,7 @@ void CensusCalculate(const Mat& leftImage,const Mat& rightImage,const int Census
                     neighborPixel = rightImage.at<uchar>(m,n);
 
                     bigger = (neighborPixel > CenterPixel) ? 1 : 0;
-                    rightCensusTemp[( x * width + y) * bitlength + bitCount/32] |= (bigger << (bitCount % 32));
+                    rightCensusTemp[( x * width + y) * bitlength + bitCount/32] |= (bigger << (bitCount % 32));  //保存census变换后的二进制码流
                 }
             }
         }
@@ -382,14 +388,16 @@ int GetHammingWeight(unsigned int value)
     return count;  
 } 
 
-void CalculateCensusCost(const vector<unsigned int> &leftCensus,const vector<unsigned int> &rightCensus,
-                        const int disparity,const int CensusWindows,vector<vector<vector<long>>>& Cleftbuf,vector<vector<vector<long>>>& Crightbuf,Mat& Census)
+void CalculateCensusCost(const vector<unsigned int> &leftCensus,const vector<unsigned int> &rightCensus,const int CensusWindows,const int minDisparity,const int maxDisparity,
+vector<vector<vector<long>>>& Cleftbuf,vector<vector<vector<long>>>& Crightbuf,Mat& Census)
 {
     int CensusPixelSum = (2 * CensusWindows + 1) * (2 * CensusWindows + 1);
     int bitlength = (CensusPixelSum % 32 == 0) ? (CensusPixelSum / 32) : ( CensusPixelSum / 32 + 1 );
 
     int width = Census.cols;
     int height = Census.rows;
+
+    const int DisparityRange = maxDisparity - minDisparity + 1;
 
     int sumright = 0;
 
@@ -399,47 +407,51 @@ void CalculateCensusCost(const vector<unsigned int> &leftCensus,const vector<uns
     {
         for(int j = 0; j < width; j++)
         {
-            for (int d = 0; d < disparity;d++)
+            for (int d = minDisparity; d < maxDisparity + 1; d++)
             {
                 sumright = 0;
                 sumleft = 0;
                 for(int l = 0; l < bitlength; l++)
                 {
-                        sumright += GetHammingWeight(rightCensus[(i*width+j)*bitlength + l]   
-                            ^ leftCensus[(i*width+j+d)*bitlength + l]); 
+                        sumright += GetHammingWeight(rightCensus[(i*width+j)*bitlength + l]   //计算像素的汉明距代价
+                            ^ leftCensus[(i*width+j+d-minDisparity)*bitlength + l]); 
 
                         sumleft += GetHammingWeight(leftCensus[(i*width+j)*bitlength + l]   
-                            ^ rightCensus[(i*width+j-d)*bitlength + l]);                                         
+                            ^ rightCensus[(i*width+j-d+minDisparity)*bitlength + l]);                                         
                 }
-                Cleftbuf[i][j][d] = sumleft;
-                Crightbuf[i][j][d] = sumright;
+                Cleftbuf[i][j][d - minDisparity] = sumleft;
+                Crightbuf[i][j][d - minDisparity] = sumright;
             }
 
             int  tempIndex = 0;
-            for (int d = 1; d < disparity; d++)
+            for (int d = 1; d < DisparityRange; d++)
             {
                 if (Cleftbuf[i][j][d] < Cleftbuf[i][j][tempIndex])  
                  {    
                      tempIndex = d;  
                  }
             }
-            Census.at<uchar>(i,j)=(tempIndex*2);
+
+            Census.at<uchar>(i,j) = (tempIndex + minDisparity)* 2;
+            //( (tempIndex + minDisparity）*2);
         }
     }
-    //imwrite("census.jpg",CensusDisparity);
+    imwrite("census.jpg",Census);
 }
 
-void CalculateBTHammingDistance(const vector<vector<vector<long>>>& Cbuf,vector<vector<vector<long>>>& Ccost,const int SADWindows,Mat& CensusSAD)
+void CalculateBTHammingDistance(const vector<vector<vector<long>>>& Cbuf,vector<vector<vector<long>>>& Ccost,const int minDisparity,const int maxDisparity,const int SADWindows,Mat& CensusSAD)
 {  
     int height = Cbuf.size();
     int width = Cbuf[1].size();
-    int disparity = Cbuf[1][1].size();
+    //int disparity = Cbuf[1][1].size();
 //  const size_t bufferSize = width * height * bitlength;
     int x1 = SADWindows;
     int y1 = SADWindows;
 
     int x2 = height - SADWindows;
     int y2 = width - SADWindows;
+
+    const int DisparityRange = maxDisparity - minDisparity + 1;
 
     //Mat CensusSAD(height,width,0);
 
@@ -449,7 +461,7 @@ void CalculateBTHammingDistance(const vector<vector<vector<long>>>& Cbuf,vector<
     {
         for(int y = y1; y < y2; y++)
         {
-            for(int d = 0;d < disparity;d++)
+            for(int d = 0;d < DisparityRange;d++)
             {
                 sum = 0;
                 for(int m = x - SADWindows; m <= x + SADWindows; m++)
@@ -459,33 +471,34 @@ void CalculateBTHammingDistance(const vector<vector<vector<long>>>& Cbuf,vector<
                         sum = sum  + Cbuf[m][n][d];
                     }
                 }
-                Ccost[x][y][d] = sum/((2 *SADWindows + 1) * (2 * SADWindows + 1));
+                Ccost[x][y][d] = sum/((2 *SADWindows + 1) * (2 * SADWindows + 1)); ////census块匹配,求取块平均值作为Ccost
             }
            
             int tempIndex = 0;
-            for (int d = 1; d < disparity; d++)
+            for (int d = 1; d < DisparityRange; d++)
             {
                 if (Ccost[x][y][d] < Ccost[x][y][tempIndex]) 
                 {  
                      tempIndex = d;      
                 }
             }
-            CensusSAD.at<uchar>(x,y)=(tempIndex * 2);
+            CensusSAD.at<uchar>(x,y)=(tempIndex + minDisparity)* 2;
         }
     }
-    // imwrite(str,CensusBTDisparity);
+    imwrite("CensusSAD.png",CensusSAD);
 }
 
-void CalculateDymProgCost(const vector<vector<vector<long>>>& Cbuf,const int P1,const int P2,Mat& CalculateDym)
+void CalculateDymProgCost(const vector<vector<vector<long>>>& Cbuf,const int P1,const int P2,const int minDisparity,const int maxDisparity,Mat& CalculateDym)
 {
     const int height = Cbuf.size();
     const int width = Cbuf[1].size();
     const int disparity = Cbuf[1][1].size();
     const int Pathnum = 8;
+    const int DisparityRange = maxDisparity - minDisparity + 1;
 
-    vector<vector<vector<vector<int>>>> S;
+    vector<vector<vector<vector<int>>>> S;  //保存各方向匹配代价
 
-    S.resize(Pathnum);
+    S.resize(Pathnum);  
     for(int i = 0;i < Pathnum;i++)
     {
         S[i].resize(height);
@@ -494,21 +507,19 @@ void CalculateDymProgCost(const vector<vector<vector<long>>>& Cbuf,const int P1,
             S[i][j].resize(width);
             for(int k = 0;k < width;k++)
             {
-                S[i][j][k].resize(disparity+2);
-                S[i][j][k][0] = S[i][j][k][disparity+1] = SHRT_MAX;
+                S[i][j][k].resize(DisparityRange+2);
+                S[i][j][k][0] = S[i][j][k][DisparityRange+1] = SHRT_MAX; //边界条件
             }
         }     
     }   
 
     vector<int> minLr(width); //保存上一次的最小值
 
-    vector<int> Delta(Pathnum);
-   
     vector<int> Lr;
-    Lr.resize(disparity + 2);
+    Lr.resize(DisparityRange + 2);  //定义多一个,保证动态规划边界条件
    
     vector<int> Lrpre;
-    Lrpre.resize(disparity + 2);
+    Lrpre.resize(DisparityRange + 2);
     
     vector<PathDirection>Paths;
     initPaths(height, width,Paths);
@@ -530,10 +541,10 @@ void CalculateDymProgCost(const vector<vector<vector<long>>>& Cbuf,const int P1,
 
                 minLr[j] = SHRT_MAX;
 
-                for(int d = 0;d < disparity;d++)
+                for(int d = 0;d < DisparityRange;d++)
                 {
-                    Lr[d+1] = Cbuf[i][j][d] + std::min((int)Lrpre[d + 1], std::min(Lrpre[d] + P1, std::min(Lrpre[d+2] + P1, Delta))) - Delta;  
-                    minLr[j] = std::min(minLr[j],  Lr[d+1]);
+                    Lr[d+1] = Cbuf[i][j][d] + std::min((int)Lrpre[d + 1], std::min(Lrpre[d] + P1, std::min(Lrpre[d+2] + P1, Delta))) - Delta;  //动态规划公式
+                    minLr[j] = std::min(minLr[j],  Lr[d+1]);                                                     //d从1开始可以避免Lrpre[-1]情况
                 }
                 S[path][i][j] = Lr;
                 std::swap(Lr,Lrpre);
@@ -558,7 +569,7 @@ void CalculateDymProgCost(const vector<vector<vector<long>>>& Cbuf,const int P1,
     {
         for(int j = 0;j < width;j++)
         {
-            for(int d = 0;d < disparity;d++)
+            for(int d = 0;d < DisparityRange;d++)
             {
                 for(int path=0;path < Pathnum;path++)
                 {
@@ -568,7 +579,7 @@ void CalculateDymProgCost(const vector<vector<vector<long>>>& Cbuf,const int P1,
 
             int tempIndex = 0;
 
-            for (int d = 1; d < disparity; d++)
+            for (int d = 1; d < DisparityRange; d++)
             {
                 if (Sbuf[i][j][d] < Sbuf[i][j][tempIndex]) 
                 {  
@@ -576,7 +587,7 @@ void CalculateDymProgCost(const vector<vector<vector<long>>>& Cbuf,const int P1,
                 }
             }
 
-            CalculateDym.at<uchar>(i,j)=(tempIndex);      
+            CalculateDym.at<uchar>(i,j)=(tempIndex + minDisparity);      
         }
     }
 
@@ -613,12 +624,12 @@ void CalculateDymProgCost(const vector<vector<vector<long>>>& Cbuf,const int P1,
 
 }
 
-void HoleFilling(const Mat& leftDisparityImg,const Mat& rightDisparityImg,const int threshold,Mat& modifyDisparityImg)
+void HoleFilling(const Mat& leftDisparityImg,const Mat& rightDisparityImg,const int minthreshold,const int maxthreshold,Mat& modifyDisparityImg)
 {
     const int width = leftDisparityImg.cols;
     const int height = leftDisparityImg.rows;
 
-    for(int y = 0;y < height;y++)   
+    for(int y = 0;y < height;y++)   //左右一致性检验
     {
        const uchar* leftptr = leftDisparityImg.ptr<uchar>(y);
        const uchar* rightptr = rightDisparityImg.ptr<uchar>(y);
@@ -633,7 +644,7 @@ void HoleFilling(const Mat& leftDisparityImg,const Mat& rightDisparityImg,const 
             
             int pr = (uchar)rightptr[x-pl];
 
-            abs(pr - pl) > threshold ? modifyDisparityImg.at<uchar>(y,x) = 0 : modifyDisparityImg.at<uchar>(y,x) = 3 * pr;
+            abs(pr - pl) > minthreshold ? modifyDisparityImg.at<uchar>(y,x) = 0 : modifyDisparityImg.at<uchar>(y,x) = 2 * pr;
         }
     }
 
@@ -645,8 +656,17 @@ void HoleFilling(const Mat& leftDisparityImg,const Mat& rightDisparityImg,const 
         {
             int temp = (uchar)modifyDisparityImg.at<uchar>(y,x);
 
+            
+
             if(temp == 0)
             {
+                int pl = (uchar)leftDisparityImg.at<uchar>(y,x);
+                if(x - pl < 0) 
+                    pl = x;
+                int pr = (uchar)rightDisparityImg.at<uchar>(y,x-pl);
+
+                if( abs(pl-pr) > maxthreshold)
+                    continue;
                 int lp = 0,rp = 0;
 
                 int lx = x,rx = x;
@@ -662,12 +682,27 @@ void HoleFilling(const Mat& leftDisparityImg,const Mat& rightDisparityImg,const 
                 while((rp == 0) && ( rx < width))
                     rp = (uchar)modifyDisparityImg.at<uchar>(y,rx++);
 
-                modifyDisparityImg.at<uchar>(y,x) =  std::min(rp,lp);
+                modifyDisparityImg.at<uchar>(y,x) =  std::min(rp,lp); // 遮挡填充
                 // modifyDisparityImg.at<uchar>(y,x) =(rp + lp) / 2;
             }
             
         }
     }
+}
+
+
+void DisparityRangeCalculate(const double minDis,const double maxDis,const double baseLength,const double focalLength,int& minDisparity, int& maxDisparity)
+{
+    /*
+
+    focalLenghth ---->>> 像素
+    baseLength ----->>> mm
+    maxDis ----->>> m
+    minDis ----->>> m
+
+    */
+    minDisparity = (int)focalLength * abs(baseLength) * 0.001 / maxDis;
+    maxDisparity = (int)focalLength * abs(baseLength) * 0.001 / minDis;
 }
 
 int main()
@@ -689,12 +724,14 @@ int main()
         tab[x] = (uchar)(x - OFS < -FilterCapnum ? 0 : x - OFS > FilterCapnum ? FilterCapnum*2 : x - OFS + FilterCapnum);
     }
 
-    // preSobelFilterCap(leftImage,rightImage,tab,OFS);
+    //preSobelFilterCap(leftImage,rightImage,tab,OFS);
 
-    const int disparity = 128;
+    const int minDisparity = 20;
+    const int maxDisparity = 250;
+
+    const int DisparityRange = maxDisparity - minDisparity + 1;
     const int CensusWindows = 5;
-    const int SADWindows = 5;
-
+    const int SADWindows = 2;
     vector<unsigned int>leftCensus;
     vector<unsigned int>rightCensus;
 
@@ -711,7 +748,9 @@ int main()
     Mat modifyDisparityImg(height,width,0);
     Mat modifyDisparityImgSAD(height,width,0);
 
-    CensusCalculate(leftImage,rightImage,CensusWindows,leftCensus,rightCensus,disparity);
+    cout << "CensusCalculate" << endl;
+
+    CensusCalculate(leftImage,rightImage,CensusWindows,leftCensus,rightCensus,minDisparity,maxDisparity);
 
     vector<vector<vector<long>>> Cleftbuf;
     vector<vector<vector<long>>> Crightbuf;
@@ -739,45 +778,48 @@ int main()
 
         for(int j = 0;j < width;++j)
         {
-            Cleftbuf[i][j].resize(disparity);
-            Crightbuf[i][j].resize(disparity);
+            Cleftbuf[i][j].resize(DisparityRange);
+            Crightbuf[i][j].resize(DisparityRange);
 
-            CBTcost[i][j].resize(disparity);
+            CBTcost[i][j].resize(DisparityRange);
 
-            CensusleftBTcost[i][j].resize(disparity);
-            CensusrightBTcost[i][j].resize(disparity);
+            CensusleftBTcost[i][j].resize(DisparityRange);
+            CensusrightBTcost[i][j].resize(DisparityRange);
         }       
     }
     cout << "SAD" << endl;
     // CalculateSADCost(leftImage,rightImage,SADWindows,disparity,CBTcost,SAD);
 
     cout << "CalculateCensusCost" << endl;
-    CalculateCensusCost(leftCensus,rightCensus,disparity,CensusWindows,Cleftbuf,Crightbuf,Census);
+    CalculateCensusCost(leftCensus,rightCensus,CensusWindows,minDisparity,maxDisparity,Cleftbuf,Crightbuf,Census);
+    const int P1 = 10;
+    const int P2 = 30;
+    CalculateDymProgCost(Cleftbuf,P1,P2,minDisparity,maxDisparity,CensusDymleft);
+    CalculateDymProgCost(Crightbuf,P1,P2,minDisparity,maxDisparity,CensusDymright);
+
+    HoleFilling(CensusDymleft,CensusDymright,2,20,modifyDisparityImg);
+    medianBlur ( modifyDisparityImgSAD,modifyDisparityImgSAD, 3 );
 
     cout << "CalculateBTHammingDistance" << endl;
-    CalculateBTHammingDistance(Cleftbuf,CensusleftBTcost,SADWindows,CensusSAD);
-    CalculateBTHammingDistance(Crightbuf,CensusrightBTcost,SADWindows,CensusSAD);
+    CalculateBTHammingDistance(Cleftbuf,CensusleftBTcost,minDisparity,maxDisparity,SADWindows,CensusSAD);
+    CalculateBTHammingDistance(Crightbuf,CensusrightBTcost,minDisparity,maxDisparity,SADWindows,CensusSAD);
 
-    const int P1 = 3;
-    const int P2 = 20;
-
-    cout << "CalculateDym" << endl;
-    CalculateDymProgCost(Cleftbuf,P1,P2,CensusDymleft);
-    CalculateDymProgCost(Crightbuf,P1,P2,CensusDymright);
 
     cout << "CalculateDymSAD" << endl;
-    CalculateDymProgCost(CensusleftBTcost,P1,P2,CensusDymSADleft);
-    CalculateDymProgCost(CensusrightBTcost,P1,P2,CensusDymSADright);
+    CalculateDymProgCost(CensusleftBTcost,P1,P2,minDisparity,maxDisparity,CensusDymSADleft);
+    CalculateDymProgCost(CensusrightBTcost,P1,P2,minDisparity,maxDisparity,CensusDymSADright);
 
-    HoleFilling(CensusDymleft,CensusDymright,2,modifyDisparityImg);
-    medianBlur ( modifyDisparityImg, modifyDisparityImg, 3 );  
-
-    HoleFilling(CensusDymSADleft,CensusDymSADright,2,modifyDisparityImgSAD);
+    HoleFilling(CensusDymSADleft,CensusDymSADright,2,20,modifyDisparityImgSAD);
     medianBlur ( modifyDisparityImgSAD,modifyDisparityImgSAD, 3 );
+
+    imshow("modifyDisparityImgSAD",modifyDisparityImgSAD); 
 
     cout << "-----" << endl;
     imshow("left",leftImage);
     imshow("right",rightImage);
+    
+    imshow("CensusDym",CensusDymleft);
+    imshow("modifyDisparityImg",modifyDisparityImg);
     //imshow("SAD",SAD);
     /*
     imshow("Census",Census);
@@ -785,12 +827,13 @@ int main()
     imshow("CensusDym",CensusDym);
     imshow("CensusSADDym",CensusDymSAD);
     */
+   /*
     imshow("CensusDym",CensusDymleft);
     imshow("CensusSADDym",CensusDymSADleft);
     imshow("CensusDymleft",CensusDymleft);
     imshow("modifyDisparityImg",modifyDisparityImg);
-    imshow("modifyDisparityImgSAD",modifyDisparityImgSAD);
-
+    
+*/
     int key = waitKey(0);
     if(key == 27) 
         return 0;
