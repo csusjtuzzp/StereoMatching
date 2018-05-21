@@ -10,8 +10,13 @@
 #include <opencv2/videoio.hpp>
 #include <opencv2/highgui.hpp>
 
+#include <pcl/visualization/cloud_viewer.h>
+#include <pcl/io/io.h>  
+#include <pcl/io/pcd_io.h> 
+
 using namespace cv;
 using namespace std;
+using namespace pcl;
 
 typedef uchar PixType;
 typedef short CostType;
@@ -24,6 +29,19 @@ struct PathDirection
     int dc,dr;
     int dx,dy;
 };
+
+Mat mleft,mright,mmodify;
+Mat leftImage;
+void on_Trackbar(int, void*);
+
+int minThreshold = 2;
+int maxThreshold = 10;
+
+const double baseLength = 125.179;
+const double fx = 353.454;
+const double fy = 353.421;
+const double u0 = 321.757;
+const double v0 = 164.697;
 
 void initPaths(int height, int width,vector<PathDirection>& Paths)
 {
@@ -587,7 +605,7 @@ void CalculateDymProgCost(const vector<vector<vector<long>>>& Cbuf,const int P1,
                 }
             }
 
-            CalculateDym.at<uchar>(i,j)=(tempIndex + minDisparity);      
+            CalculateDym.at<uchar>(i,j)=(tempIndex + minDisparity)*3;      
         }
     }
 
@@ -644,10 +662,10 @@ void HoleFilling(const Mat& leftDisparityImg,const Mat& rightDisparityImg,const 
             
             int pr = (uchar)rightptr[x-pl];
 
-            abs(pr - pl) > minthreshold ? modifyDisparityImg.at<uchar>(y,x) = 0 : modifyDisparityImg.at<uchar>(y,x) = 2 * pr;
+            abs(pr - pl) > minthreshold ? modifyDisparityImg.at<uchar>(y,x) = 0 : modifyDisparityImg.at<uchar>(y,x) =  pr;
         }
     }
-
+    
     for(int y = 0;y < height;y++)   
     {
         //const uchar* leftptr = leftDisparityImg.ptr<uchar>(y);
@@ -655,8 +673,6 @@ void HoleFilling(const Mat& leftDisparityImg,const Mat& rightDisparityImg,const 
         for(int x = 0;x < width;x++)
         {
             int temp = (uchar)modifyDisparityImg.at<uchar>(y,x);
-
-            
 
             if(temp == 0)
             {
@@ -688,6 +704,7 @@ void HoleFilling(const Mat& leftDisparityImg,const Mat& rightDisparityImg,const 
             
         }
     }
+    
 }
 
 
@@ -705,8 +722,87 @@ void DisparityRangeCalculate(const double minDis,const double maxDis,const doubl
     maxDisparity = (int)focalLength * abs(baseLength) * 0.001 / minDis;
 }
 
+
+void PointCloudViewer(const Mat& leftImage,const Mat& mmodify,const double baseLength,const double fx,const double fy,const double u0,const double v0)
+{
+    PointCloud<PointXYZRGB>::Ptr cloud(new PointCloud<PointXYZRGB>);
+
+  //  PointCloud<PointXYZ>::Ptr cloud2(new PointCloud<PointXYZI>);
+    // PointCloud::Ptr cloud ( new PointCloud );
+    const int height = mmodify.rows;
+    const int width = mmodify.cols;
+
+    for(int i = 0;i < height;i++)
+    {
+        for(int j = 0;j < width;j++)
+        {
+
+            pcl::PointXYZRGB point;
+            //pcl::PointXYZI point2;
+            /*
+
+            point.z =((double)mmodify.at<uchar>(i,j)) * 0.001;
+            point.x = (j - u0) *  point.z / fx;
+            point.y = (i - v0) *  point.z / fy;
+
+            */
+            
+            int temp = (uint)leftImage.at<uchar>(i,j);
+            
+            cout <<  (uint)mmodify.at<uchar>(i,j) << endl;
+           // if ((uint)mmodify.at<uchar>(i,j)==0)
+           //     temp = 200;
+
+            point.r = temp;
+            point.g = temp;
+            point.b = temp; 
+
+             if ((uint)mmodify.at<uchar>(i,j)==0)
+                continue;
+
+            point.z = 2 * (double)fx * abs(baseLength)  * 0.001/ ((double)mmodify.at<uchar>(i,j));
+            cout << point.z << endl;
+
+            point.x = (j - u0)* point.z / fx;
+            point.y = (i - v0)* point.z / fy;
+            //point.intensity = temp;
+
+            cloud->points.push_back(point);
+
+/*
+            point2.z =(double)temp;
+            cout << point.z << endl;
+
+            point2.x = (j - u0)* point2.z / fx;
+            point2.y = (i - v0)* point2.z / fy;
+            cloud2->points.push_back(point2); */
+        }
+    }
+
+    
+    cloud->height = 1;
+    cloud->width = cloud->points.size();
+
+   // cloud2->height = 1;
+    //cloud2->width = cloud2->points.size();
+
+    cloud->is_dense = false;
+   // cloud2->is_dense = false; 
+
+    pcl::io::savePCDFile( "./pointcloud.pcd", *cloud );
+    //pcl::io::savePCDFile( "./pointcloud2.pcd", *cloud2 );
+
+    cloud->points.clear();
+    //cloud2->points.clear();
+    cout<<"Point cloud saved."<<endl; 
+}
+
+
+
 int main()
 {
+    //leftImage = imread("left.png",0);
+    
     Mat leftImage = imread("left.png",0);
     Mat rightImage = imread("right.png",0);
 
@@ -726,11 +822,11 @@ int main()
 
     //preSobelFilterCap(leftImage,rightImage,tab,OFS);
 
-    const int minDisparity = 20;
+    const int minDisparity = 5;
     const int maxDisparity = 250;
 
     const int DisparityRange = maxDisparity - minDisparity + 1;
-    const int CensusWindows = 5;
+    const int CensusWindows = 2;
     const int SADWindows = 2;
     vector<unsigned int>leftCensus;
     vector<unsigned int>rightCensus;
@@ -793,33 +889,84 @@ int main()
     cout << "CalculateCensusCost" << endl;
     CalculateCensusCost(leftCensus,rightCensus,CensusWindows,minDisparity,maxDisparity,Cleftbuf,Crightbuf,Census);
     const int P1 = 10;
-    const int P2 = 30;
-    CalculateDymProgCost(Cleftbuf,P1,P2,minDisparity,maxDisparity,CensusDymleft);
-    CalculateDymProgCost(Crightbuf,P1,P2,minDisparity,maxDisparity,CensusDymright);
+    const int P2 = 50;
+  //  CalculateDymProgCost(Cleftbuf,P1,P2,minDisparity,maxDisparity,CensusDymleft);
+  //  CalculateDymProgCost(Crightbuf,P1,P2,minDisparity,maxDisparity,CensusDymright);
 
-    HoleFilling(CensusDymleft,CensusDymright,2,20,modifyDisparityImg);
-    medianBlur ( modifyDisparityImgSAD,modifyDisparityImgSAD, 3 );
+   // HoleFilling(CensusDymleft,CensusDymright,2,20,modifyDisparityImg);
+   // medianBlur ( modifyDisparityImgSAD,modifyDisparityImgSAD, 3 );
 
     cout << "CalculateBTHammingDistance" << endl;
     CalculateBTHammingDistance(Cleftbuf,CensusleftBTcost,minDisparity,maxDisparity,SADWindows,CensusSAD);
     CalculateBTHammingDistance(Crightbuf,CensusrightBTcost,minDisparity,maxDisparity,SADWindows,CensusSAD);
 
-
     cout << "CalculateDymSAD" << endl;
     CalculateDymProgCost(CensusleftBTcost,P1,P2,minDisparity,maxDisparity,CensusDymSADleft);
     CalculateDymProgCost(CensusrightBTcost,P1,P2,minDisparity,maxDisparity,CensusDymSADright);
 
-    HoleFilling(CensusDymSADleft,CensusDymSADright,2,20,modifyDisparityImgSAD);
-    medianBlur ( modifyDisparityImgSAD,modifyDisparityImgSAD, 3 );
+    //HoleFilling(CensusDymSADleft,CensusDymSADright,2,20,modifyDisparityImgSAD);
+    //medianBlur ( modifyDisparityImgSAD,modifyDisparityImgSAD, 3 );
 
-    imshow("modifyDisparityImgSAD",modifyDisparityImgSAD); 
+   // int minThreshold = 0;
+   // int maxThreshold = 0;
+   
+    imwrite("modifyDisparityImgSAD.png",modifyDisparityImgSAD);
 
-    cout << "-----" << endl;
-    imshow("left",leftImage);
-    imshow("right",rightImage);
+    mleft = CensusDymSADleft;
+    mright = CensusDymSADright;
+    mmodify = modifyDisparityImgSAD;
+
+    //imwrite("mmodify.png",mmodify);
+    imwrite("mleft.png",mleft);
+    imwrite("mright.png",mright); 
     
+
+    //mleft = imread("mleft.png",0);
+    //mright = imread("mright.png",0);
+
+    //mmodify.create(mleft.rows,mleft.cols,CV_8UC1);
+
+   // HoleFilling(mleft,mright,minThreshold,maxThreshold,mmodify);
+   // imshow("modify", mmodify);
+   // PointCloudViewer(leftImage,mleft,baseLength,fx,fy,u0,v0);
+
+    // createTrackbar("Low: 20", "modify", &minThreshold, 100, on_Trackbar);
+    // createTrackbar("High: 50", "modify", &maxThreshold, 100, on_Trackbar);
+
+
+    //mmodify.create(mleft.rows,mleft.cols,CV_8UC1);
+    //PointCloudViewer(leftImage,mleft,baseLength,fx,fy,u0,v0);
+    /*
+    mright = imread("mright.png",0);
+    //Mat modify = imread("modifyDisparityImgSAD.png",-1);
+    mmodify.create(mleft.rows,mleft.cols,CV_8UC1);
+    // mmodify = modify;
+    //PointCloudViewer(mmodify,baseLength,fx,fy,u0,v0);
+
+    //HoleFilling(mleft,mright,minThreshold,maxThreshold,mmodify);
+
+   
+
+    //PointCloudViewer(mmodify,baseLength,fx,fy,u0,v0);
+
+    //imshow("modifyDisparityImg",modifyDisparityImg);
+
+    namedWindow("modify", WINDOW_AUTOSIZE);
+     //imshow("modify", mmodify);
+
+    createTrackbar("Low: 20", "modify", &minThreshold, 100, on_Trackbar);
+    createTrackbar("High: 50", "modify", &maxThreshold, 100, on_Trackbar);
+
+    //imshow("modifyDisparityImgSAD",modifyDisparityImgSAD); 
+
+    //cout << "-----" << endl;
+    //imshow("left",leftImage);
+    //imshow("right",rightImage); */
+    /*
     imshow("CensusDym",CensusDymleft);
+    imwrite("CensusDym.png",CensusDymleft);
     imshow("modifyDisparityImg",modifyDisparityImg);
+    imwrite("modifyDisparityImg.png",modifyDisparityImg); */
     //imshow("SAD",SAD);
     /*
     imshow("Census",Census);
@@ -835,6 +982,24 @@ int main()
     
 */
     int key = waitKey(0);
-    if(key == 27) 
+   if(key == 27) 
         return 0;
 }
+
+
+void on_Trackbar(int, void*)
+{
+    cout << "Threshold value: " <<endl;
+    cout << "min: " << minThreshold << endl;
+    cout << "max: " << maxThreshold << endl;
+
+
+    HoleFilling(mleft,mright,minThreshold,maxThreshold,mmodify);
+    medianBlur ( mmodify,mmodify, 3);
+
+
+    // PointCloudViewer(leftImage,mmodify,baseLength,fx,fy,u0,v0);
+
+    imshow("modify", mmodify);
+}
+
